@@ -1,0 +1,6 @@
+{
+  "name": "英文单词听写音频生成器",
+  "description": "可以批量输入英文单词，随机抽词，并可自由配置重复次数、单词间隔、测试顺序。支持生成并下载英音男音/女音的听写音频以及PDF单词对照表。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
