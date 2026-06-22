@@ -21,7 +21,7 @@ import {
   ListOrdered
 } from "lucide-react";
 import { PRESETS } from "./presets";
-import { fetchAndDecodeTTS, bufferToWav } from "./utils/audio";
+import { fetchAndDecodeTTS, bufferToWav, speakWordClientSide } from "./utils/audio";
 import { generateDictationPDF } from "./utils/pdf";
 
 export default function App() {
@@ -295,8 +295,14 @@ export default function App() {
         setIndividualPlayingWord(null);
       };
     } catch (err) {
-      console.error("Individual word play failed: ", err);
-      setIndividualPlayingWord(null);
+      console.warn("Express API TTS failed or not available (likely on GitHub Pages). Trying direct Web Speech synthesis...", err);
+      try {
+        await speakWordClientSide(word, voiceGender);
+      } catch (synthErr) {
+        console.error("Local client speech synthesis failed:", synthErr);
+      } finally {
+        setIndividualPlayingWord(null);
+      }
     }
   };
 
