@@ -18,11 +18,12 @@ import {
   AlertCircle,
   Layers,
   ChevronRight,
-  ListOrdered
+  ListOrdered,
+  Key,
+  Copy
 } from "lucide-react";
 import { PRESETS } from "./presets";
 import { fetchAndDecodeTTS, bufferToWav, speakWordClientSide } from "./utils/audio";
-import { generateDictationPDF } from "./utils/pdf";
 
 export default function App() {
   // Input section
@@ -39,6 +40,19 @@ export default function App() {
   const [intervalSeconds, setIntervalSeconds] = useState<3 | 5 | 7>(5);
   const [order, setOrder] = useState<"random" | "sequential">("random");
   const [speechRate, setSpeechRate] = useState<0.8 | 1.0 | 1.2>(1.0);
+
+  // Google Cloud Text-to-Speech API key for standalone static hosting setups (e.g., GitHub Pages)
+  const [googleApiKey, setGoogleApiKey] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("dictation_google_api_key") || "";
+    }
+    return "";
+  });
+
+  const handleApiKeyChange = (newKey: string) => {
+    setGoogleApiKey(newKey);
+    localStorage.setItem("dictation_google_api_key", newKey);
+  };
 
   // Generated results
   const [selectedWords, setSelectedWords] = useState<string[]>([]);
@@ -58,6 +72,8 @@ export default function App() {
   const [isAnswersVisible, setIsAnswersVisible] = useState<boolean>(false);
   const [individualPlayingWord, setIndividualPlayingWord] = useState<string | null>(null);
   const [wordResults, setWordResults] = useState<Record<string, "correct" | "incorrect" | "unmarked">>({});
+  const [showPlainList, setShowPlainList] = useState<boolean>(false);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
 
   // Error handling
   const [errorText, setErrorText] = useState<string>("");
@@ -144,7 +160,7 @@ export default function App() {
         setGenerationProgress(`正在生成英式单词读音 [${i + 1}/${finalWords.length}]: "${word}"...`);
         
         try {
-          const buffer = await fetchAndDecodeTTS(word, voiceGender, audioCtx);
+          const buffer = await fetchAndDecodeTTS(word, voiceGender, audioCtx, googleApiKey);
           decodedBuffers.push(buffer);
         } catch (fetchErr: any) {
           console.error(`Error loading TTS for word: ${word}`, fetchErr);
@@ -284,7 +300,7 @@ export default function App() {
     
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const buffer = await fetchAndDecodeTTS(word, voiceGender, audioCtx);
+      const buffer = await fetchAndDecodeTTS(word, voiceGender, audioCtx, googleApiKey);
       const source = audioCtx.createBufferSource();
       source.buffer = buffer;
       source.playbackRate.value = speechRate;
@@ -615,6 +631,41 @@ challenge, scientific, opportunity..."
                 </span>
               </div>
 
+              {/* Google API Key Configuration */}
+              <div className="md:col-span-2 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <Key className="h-4 w-4 text-indigo-500" />
+                    <span>Google Cloud Text-to-Speech API 密钥</span>
+                  </label>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 font-medium">
+                    静态网络托管支持 (GitHub Pages)
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="password"
+                    placeholder="在此输入您的 Google API Key (可安全保存在本地由浏览器存储)..."
+                    value={googleApiKey}
+                    onChange={(e) => handleApiKeyChange(e.target.value)}
+                    className="w-full py-2 px-3 pr-10 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring focus:ring-indigo-100 text-xs font-mono"
+                  />
+                  {googleApiKey && (
+                    <button
+                      type="button"
+                      onClick={() => handleApiKeyChange("")}
+                      className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 hover:text-rose-500 transition"
+                      title="清除密钥"
+                    >
+                      清空
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
+                  如果您在本地或含后端的服务器（下载音频有声音），此处<strong>可不填</strong>。如果是发布到 <strong>GitHub Pages 静态页</strong>，由于浏览器安全跨域限制 (CORS)，直接去拿公共语音文件并打包录音会遇到跨域，产生<strong>静音音频</strong>。提供启用过 <code>Text-to-Speech API</code> 的 Google API Key 之后，能以最高清的 Wavenet / Neural2 英式原声进行合成，打包下载即可获得高品质读音！
+                </p>
+              </div>
+
             </div>
 
             {/* Error indicator banner */}
@@ -807,16 +858,66 @@ challenge, scientific, opportunity..."
                     <span>下载听写音频 (.wav)</span>
                   </a>
 
-                  {/* Download PDF WordList */}
+                  {/* Show/Copy Plain text word list */}
                   <button
-                    onClick={() => generateDictationPDF(selectedWords, voiceGender, repeatCount, intervalSeconds, order)}
-                    className="py-3 px-2 text-center rounded-xl bg-slate-900 hover:bg-slate-800 text-white shadow hover:-translate-y-[1px] transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    onClick={() => setShowPlainList(!showPlainList)}
+                    className={`py-3 px-2 text-center rounded-xl font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      showPlainList
+                        ? "bg-indigo-50 border border-indigo-200 text-indigo-700"
+                        : "bg-slate-900 hover:bg-slate-800 text-white shadow hover:-translate-y-[1px]"
+                    }`}
                   >
                     <FileText className="h-4 w-4" />
-                    <span>生成PDF对照词表</span>
+                    <span>{showPlainList ? "隐藏文本对照表" : "生成普通文本列表"}</span>
                   </button>
 
                 </div>
+
+                {/* Plain Text Word List Container */}
+                {showPlainList && (
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 mt-4 space-y-3 animate-fadeIn">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <ListOrdered className="h-4 w-4 text-slate-500" />
+                        <span>听写顺序单词列表 (一行一个)</span>
+                      </span>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(selectedWords.join("\n"));
+                            setIsCopied(true);
+                            setTimeout(() => setIsCopied(false), 2000);
+                          } catch (err) {
+                            console.error("Failed to copy words: ", err);
+                          }
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-850 font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        {isCopied ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="text-emerald-600 font-bold">已复制！</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5" />
+                            <span>一键复制全表</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <textarea
+                      readOnly
+                      value={selectedWords.join("\n")}
+                      rows={Math.min(10, Math.max(3, selectedWords.length))}
+                      className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:ring-0 leading-relaxed select-all"
+                      onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      提示：点击框内文本可全选，支持直接复制粘贴到 Excel、Notion 或记事本中。
+                    </p>
+                  </div>
+                )}
 
               </div>
             </div>
@@ -974,7 +1075,7 @@ challenge, scientific, opportunity..."
 
                     <p className="text-[10px] text-slate-400 leading-normal pt-1 flex items-center gap-1">
                       <Check className="h-3 w-3 text-emerald-500" />
-                      点击右侧对钩或叉号来计算您的分值。听写结束后，请点击上方“导出PDF对照词表”来归档拼写本来查漏补缺。
+                      点击右侧对钩或叉号来计算您的分值。听写结束后，可点击上方“生成普通文本列表”一键复制。
                     </p>
                   </div>
 
@@ -1002,7 +1103,7 @@ challenge, scientific, opportunity..."
             <p className="text-xs text-slate-400 leading-relaxed">
               1. 载入词汇集并设定听写数量为 10~20 个；<br />
               2. 朗读重复次数设置为“读2遍”，每词书写留空设定为“5秒”；<br />
-              3. 选择“乱序”以排除记忆惰性。点击编译并下载 PDF 纸张打印出来；<br />
+              3. 选择“乱序”以排除记忆惰性。点击编译可快速复制对应的文本对照列表；<br />
               4. 播放音频并进行拼写。拼写完毕点击展开对比对照。
             </p>
           </div>

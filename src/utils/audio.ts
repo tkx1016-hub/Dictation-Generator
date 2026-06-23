@@ -82,15 +82,58 @@ function writeString(view: DataView, offset: number, str: string) {
 }
 
 /**
- * Fetches an audio path from Express /api/tts endpoint and decodes it.
- * Falls back to public dictionary APIs if running on a static server (like GitHub Pages).
+ * Fetches audio for a word. If a Google Cloud API Key is given, we fetch directly from Google Cloud TTS.
+ * Otherwise, we fallback to the Express /api/tts endpoint, then to Youdao, then a silent buffer.
  */
 export async function fetchAndDecodeTTS(
   word: string,
   gender: "male" | "female",
-  audioContext: AudioContext
+  audioContext: AudioContext,
+  googleApiKey?: string
 ): Promise<AudioBuffer> {
-  // If we are on static hosting, /api/tts might not exist, but let's try it first
+  // If Google Cloud API key is provided, prioritize high quality Google Cloud Text-to-Speech
+  if (googleApiKey && googleApiKey.trim() !== "") {
+    try {
+      const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleApiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          input: { text: word },
+          voice: {
+            languageCode: "en-GB",
+            ssmlGender: gender.toUpperCase(),
+          },
+          audioConfig: {
+            audioEncoding: "MP3",
+          },
+        }),
+      });
+
+      if (response.ok) {
+        const json = await response.json();
+        const base64Content = json.audioContent;
+        if (base64Content) {
+          const binaryString = atob(base64Content);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          return await audioContext.decodeAudioData(bytes.buffer);
+        }
+      } else {
+        const errText = await response.text();
+        console.warn(`Google Cloud TTS API error: ${response.status} - ${errText}`);
+      }
+    } catch (err) {
+      console.warn(`Failed to synthesize with Google Cloud TTS for "${word}", falling back...`, err);
+    }
+  }
+
+  // If we are on self-hosted backend, /api/tts works
   try {
     const url = `/api/tts?word=${encodeURIComponent(word)}&gender=${gender}`;
     const response = await fetch(url);
@@ -102,7 +145,7 @@ export async function fetchAndDecodeTTS(
     console.warn(`Local API fetch failed, trying direct public API fallback for "${word}"...`, err);
   }
 
-  // Attempt 2: Direct Youdao TTS (Type 1 is British English)
+  // Attempt 3: Direct Youdao TTS (Type 1 is British English)
   try {
     const youdaoUrl = `https://dict.youdao.com/dictvoice?type=1&audio=${encodeURIComponent(word)}`;
     const response = await fetch(youdaoUrl);
